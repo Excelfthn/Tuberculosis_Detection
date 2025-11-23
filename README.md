@@ -1,6 +1,11 @@
-# Tuberculosis Detection from Chest X-Ray Images
+# 🫁 Tuberculosis Detection from Chest X-Ray Images
 
 A machine learning project for automated tuberculosis detection in chest X-ray images using traditional computer vision techniques and Support Vector Machine (SVM) classification.
+
+## 🌟 Live Demo
+**🚀 [Try the Interactive TB Detection App](https://pcd-tuberculosis-detection.streamlit.app/) 🚀**
+
+Upload your chest X-ray images and get instant TB detection results with 92.86% accuracy!
 
 ## 🎯 Project Overview
 
@@ -90,7 +95,7 @@ TB_Chest_Radiography_Database/
 ## 🌐 Streamlit Web Application
 
 ### Interactive TB Detection Interface
-🚀 **[Try the Live Demo](https://tuberculosis-detection.streamlit.app/)** 🚀
+🚀 **[Try the Live Demo](https://pcd-tuberculosis-detection.streamlit.app/)** 🚀
 
 Or run locally for testing and visualization:
 
