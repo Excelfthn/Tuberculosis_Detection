@@ -19,6 +19,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Fix for OpenCV on Streamlit Cloud
+import os
+os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
+
 # Custom CSS for better styling
 st.markdown("""
 <style>
@@ -81,6 +85,27 @@ MODEL_DIR = "trained_models"
 def load_models():
     """Load the trained models and preprocessors"""
     try:
+        # Check if model files exist
+        model_files = ['svm_model.pkl', 'scaler.pkl', 'pca.pkl']
+        missing_files = []
+        
+        for file in model_files:
+            if not os.path.exists(os.path.join(MODEL_DIR, file)):
+                missing_files.append(file)
+        
+        if missing_files:
+            st.error(f"❌ Model files not found: {', '.join(missing_files)}")
+            st.info("""📝 **Setup Instructions:**
+            
+1. The trained models are not included in the repository due to file size limits
+2. To use this app locally:
+   - Run the Jupyter notebook `pcd-final-project.ipynb`
+   - Train the model by executing all cells
+   - Models will be saved in `trained_models/` directory
+3. For cloud deployment, consider using Git LFS or cloud storage for model files
+            """)
+            return None, None, None
+        
         with open(os.path.join(MODEL_DIR, 'svm_model.pkl'), 'rb') as f:
             svm_model = pickle.load(f)
         
@@ -91,102 +116,93 @@ def load_models():
             pca = pickle.load(f)
             
         return svm_model, scaler, pca
-    except FileNotFoundError:
-        st.error("❌ Model files not found! Please train the model first using the notebook.")
+    except Exception as e:
+        st.error(f"❌ Error loading models: {str(e)}")
         return None, None, None
 
 def preprocess_image(img_bgr):
     """
-    Preprocess chest X-ray image
+    Preprocess chest X-ray image - EXACT MATCH to notebook
     """
-    # Resize to 512x512
+    # 1. Resize ke 512x512 supaya semua seragam
     img_resized = cv2.resize(img_bgr, (IMG_SIZE, IMG_SIZE))
     
-    # Convert to grayscale
+    # 2. Convert BGR -> Grayscale
     gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
     
-    # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+    # 3. CLAHE (Contrast Limited Adaptive Histogram Equalization)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    clahe_img = clahe.apply(gray)
+    enhanced = clahe.apply(gray)
     
-    # Median blur for noise reduction
-    blurred = cv2.medianBlur(clahe_img, 5)
+    # 4. Noise reduction (median blur) - NOTEBOOK USES 3, not 5!
+    denoised = cv2.medianBlur(enhanced, 3)
     
-    # Normalize to [0, 1]
-    normalized = blurred.astype(np.float32) / 255.0
+    # 5. Normalisasi ke 0–1 (float32)
+    norm = denoised.astype(np.float32) / 255.0
     
-    return normalized
+    return norm
 
 def segment_lungs(img):
     """
-    Segment lung regions using Otsu thresholding
+    Segment lung regions - EXACT MATCH to notebook
     """
-    # Convert to 0-255 for Otsu
+    # Convert ke range 0–255 lagi untuk thresholding Otsu
     img_uint8 = (img * 255).astype(np.uint8)
-    
-    # Otsu threshold
+
+    # 1. Otsu threshold
     thresh = threshold_otsu(img_uint8)
-    binary = img_uint8 > thresh
-    
-    # Morphological operations
-    selem = disk(5)
-    closed = closing(binary, selem)
-    opened = opening(closed, selem)
-    
-    # Remove small objects
-    cleaned = remove_small_objects(opened, min_size=500)
-    
-    return cleaned.astype(np.float32)
+    mask = img_uint8 > thresh   # True/False mask
+
+    # 2. Morphology cleaning - NOTEBOOK USES 300, not 500!
+    mask = closing(mask, disk(5))   # tutup lubang kecil
+    mask = opening(mask, disk(5))   # hapus noise kecil
+    mask = remove_small_objects(mask, 300)  # buang objek kecil (<300 pixel)
+
+    return mask
 
 def extract_glcm_features(img):
     """
-    Extract GLCM texture features
+    Extract GLCM texture features - matches notebook implementation
     """
     # Convert to 0-255 range
     img_uint8 = (img * 255).astype(np.uint8)
     
-    # Reduce to 32 gray levels for faster computation
-    img_reduced = img_uint8 // 8
-    
-    # Calculate GLCM
-    distances = [1, 2, 3]
+    # Use same parameters as in notebook: distances=[1, 2, 4], levels=256
+    distances = [1, 2, 4]
     angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]
     
-    features = []
-    for d in distances:
-        for angle in angles:
-            glcm = graycomatrix(img_reduced, distances=[d], angles=[angle], 
-                              levels=32, symmetric=True, normed=True)
-            
-            # Extract texture properties
-            contrast = graycoprops(glcm, 'contrast')[0, 0]
-            correlation = graycoprops(glcm, 'correlation')[0, 0]
-            energy = graycoprops(glcm, 'energy')[0, 0]
-            homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
-            
-            features.extend([contrast, correlation, energy, homogeneity])
+    # Calculate GLCM with full 256 levels to match notebook
+    glcm = graycomatrix(
+        img_uint8,
+        distances=distances,
+        angles=angles,
+        levels=256,        # Match notebook: full 256 levels
+        symmetric=True,
+        normed=True
+    )
     
-    return np.array(features)
+    # Extract properties for all distance-angle combinations
+    features = []
+    for prop in ['contrast', 'correlation', 'energy', 'homogeneity']:
+        vals = graycoprops(glcm, prop)  # shape: (len(distances), len(angles))
+        features.extend(vals.ravel())   # flatten & add to list
+    
+    return np.array(features, dtype=np.float32)
 
 def extract_lbp_features(img, P=16, R=2):
     """
-    Extract Local Binary Pattern features
+    Extract Local Binary Pattern features - matches notebook implementation
     """
     # Convert to uint8
     img_uint8 = (img * 255).astype(np.uint8)
     
-    # Calculate LBP
-    lbp = local_binary_pattern(img_uint8, P, R, method='uniform')
+    # Calculate uniform LBP
+    lbp = local_binary_pattern(img_uint8, P=P, R=R, method='uniform')
     
-    # Calculate histogram
-    n_bins = P + 2  # uniform patterns + non-uniform
-    hist, _ = np.histogram(lbp.ravel(), bins=n_bins, range=(0, n_bins))
+    # Histogram with 59 bins for uniform pattern (matches notebook)
+    hist, _ = np.histogram(lbp.ravel(), bins=59, range=(0, 59), density=True)
     
-    # Normalize histogram
-    hist = hist.astype(float)
-    hist /= (hist.sum() + 1e-7)
-    
-    return hist
+    return hist.astype(np.float32)
 
 def extract_all_features_from_lung(lung_img):
     """
@@ -201,35 +217,42 @@ def extract_all_features_from_lung(lung_img):
 
 def process_image_for_prediction(image):
     """
-    Process uploaded image for prediction
+    Process uploaded image for prediction - EXACT MATCH to notebook workflow
     """
     try:
-        # Convert PIL Image to OpenCV format
+        # Convert PIL Image to OpenCV format (BGR)
         img_array = np.array(image)
         
         # Handle different image formats
         if len(img_array.shape) == 3:
             if img_array.shape[2] == 4:  # RGBA
                 img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
-            else:  # RGB
+            elif img_array.shape[2] == 3:  # RGB
                 img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
         else:  # Grayscale
             img_bgr = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
         
-        # Preprocess
+        # Follow EXACT notebook workflow:
+        # 1. Preprocess (notebook: preprocess_image)
         img_prep = preprocess_image(img_bgr)
         
-        # Segment lungs
+        # 2. Segmentation (notebook: segment_lungs)
         mask = segment_lungs(img_prep)
-        lung_only = img_prep * mask
+        lung_only = img_prep * mask  # notebook: multiply mask
         
-        # Extract features
+        # 3. Feature extraction (notebook: extract_all_features_from_lung)
         features = extract_all_features_from_lung(lung_only)
+        
+        # Debug info
+        st.write(f"🔍 Debug: Extracted {len(features)} features")
+        st.write(f"📊 Feature shape: {features.shape}")
         
         return features, img_prep, mask, lung_only, img_bgr
         
     except Exception as e:
         st.error(f"Error processing image: {str(e)}")
+        import traceback
+        st.error(f"Full error: {traceback.format_exc()}")
         return None, None, None, None, None
 
 def create_visualization(img_bgr, lung_mask, tb_probability):
@@ -280,6 +303,16 @@ def main():
     with col1:
         st.markdown('<h2 class="sub-header">📤 Upload Image</h2>', unsafe_allow_html=True)
         
+        # Show model status
+        if svm_model is None:
+            st.warning("⚠️ Models not loaded. Please check setup instructions above.")
+            st.stop()
+        else:
+            st.success("✅ Models loaded successfully!")
+            # Show expected feature count for debugging
+            if hasattr(scaler, 'n_features_in_'):
+                st.info(f"📊 Expected features: {scaler.n_features_in_}")
+        
         uploaded_file = st.file_uploader(
             "Choose a chest X-ray image...",
             type=['png', 'jpg', 'jpeg'],
@@ -289,21 +322,33 @@ def main():
         if uploaded_file is not None:
             # Display uploaded image
             image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded X-ray Image", use_container_width=True)
+            st.image(image, caption="Uploaded X-ray Image", use_column_width=True)
             
             # Analysis button
-            if st.button("🔬 Analyze Image", type="primary", use_container_width=True):
+            if st.button("🔬 Analyze Image", type="primary"):
                 with st.spinner("🔄 Processing image and extracting features..."):
                     # Process image
                     features, img_prep, mask, lung_only, img_bgr = process_image_for_prediction(image)
                     
                     if features is not None:
-                        # Make prediction
-                        features_scaled = scaler.transform([features])
-                        features_pca = pca.transform(features_scaled)
-                        
-                        # Get prediction and probabilities
-                        prediction = svm_model.predict(features_pca)[0]
+                        try:
+                            # Validate feature dimensions
+                            expected_features = scaler.n_features_in_ if hasattr(scaler, 'n_features_in_') else len(features)
+                            if len(features) != expected_features:
+                                st.error(f"❌ Feature dimension mismatch: Expected {expected_features}, got {len(features)}")
+                                st.info("This might be due to different model training parameters. Please retrain the model with current settings.")
+                                return
+                            
+                            # Make prediction
+                            features_scaled = scaler.transform([features])
+                            features_pca = pca.transform(features_scaled)
+                            
+                            # Get prediction and probabilities
+                            prediction = svm_model.predict(features_pca)[0]
+                        except Exception as e:
+                            st.error(f"❌ Prediction error: {str(e)}")
+                            st.info("There might be a compatibility issue between the saved models and current feature extraction. Please retrain the model.")
+                            return
                         
                         # Get probabilities
                         if hasattr(svm_model, 'predict_proba'):
@@ -373,11 +418,11 @@ def main():
             col1, col2 = st.columns(2)
             with col1:
                 st.image(cv2.cvtColor(st.session_state.img_bgr, cv2.COLOR_BGR2RGB), 
-                        caption="Original X-ray", use_container_width=True)
+                        caption="Original X-ray", use_column_width=True)
             with col2:
                 st.image(visualization, 
                         caption="TB Probability Overlay (Red = Higher TB Probability)", 
-                        use_container_width=True)
+                        use_column_width=True)
             
             st.info("🔴 **Red Overlay Explanation**: The intensity of red color indicates the probability of tuberculosis in lung regions. Brighter red areas suggest higher TB probability.")
         
@@ -387,15 +432,15 @@ def main():
             
             with col1:
                 st.image(st.session_state.img_prep, caption="1. Preprocessed (CLAHE)", 
-                        use_container_width=True, clamp=True)
+                        use_column_width=True, clamp=True)
             
             with col2:
                 st.image(st.session_state.mask, caption="2. Lung Segmentation", 
-                        use_container_width=True, clamp=True)
+                        use_column_width=True, clamp=True)
             
             with col3:
                 st.image(st.session_state.lung_only, caption="3. Lung Regions Only", 
-                        use_container_width=True, clamp=True)
+                        use_column_width=True, clamp=True)
         
         with tab3:
             # Feature analysis
