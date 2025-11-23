@@ -87,6 +87,28 @@ TB_Chest_Radiography_Database/
    - Brighter red = Higher TB probability
    - Prediction confidence displayed with percentages
 
+## 🌐 Streamlit Web Application
+
+### Interactive TB Detection Interface
+Run the web application for easy testing and visualization:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Launch Streamlit app
+streamlit run app.py
+```
+
+### Web App Features
+- **📤 Drag & Drop Upload**: Easy image upload interface
+- **🔬 Real-time Analysis**: Instant TB detection results
+- **🎨 Visual Feedback**: Interactive probability overlays and processing steps
+- **📊 Comprehensive Results**: Detailed confidence scores and model performance metrics
+- **🎯 User-Friendly Design**: Clean, professional interface with progress indicators
+
+The web app opens at `http://localhost:8501` and provides the complete TB detection pipeline in an intuitive interface.
+
 ## 🎨 Visualization Features
 
 ### Real-time TB Probability Visualization
