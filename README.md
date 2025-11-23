@@ -90,7 +90,9 @@ TB_Chest_Radiography_Database/
 ## 🌐 Streamlit Web Application
 
 ### Interactive TB Detection Interface
-Run the web application for easy testing and visualization:
+🚀 **[Try the Live Demo](https://tuberculosis-detection.streamlit.app/)** 🚀
+
+Or run locally for testing and visualization:
 
 ```bash
 # Install dependencies
