@@ -241,6 +241,22 @@ Tuberculosis_Detection/
 
 ---
 
+## 👥 Contributors
+
+- **Excel Fathan Breviano** (`24/536896/PA/22778`)  
+  - Email: `excelfathanbrevianot@mail.ugm.ac.id`
+
+- **Yusuf Imantaka Bastari** (`24/532731/PA/22530`)  
+  - Email: `yusufimantakabastari@mail.ugm.ac.id`
+
+- **Muhammad Shaquille Omar Ariawan** (`23/511501/PA/21809`)  
+  - Email: `muhammadshaquilleomarariawan2005@mail.ugm.ac.id`
+
+- **Finanazwa Ayesha** (`24/532953/PA/22556`)  
+  - Email: `finanazwaayesha@mail.ugm.ac.id`
+
+---
+
 ## ⚠️ Disclaimer
 
 This project is intended **for research and educational purposes only**.  
