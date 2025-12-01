@@ -1,204 +1,249 @@
-# 🫁 Tuberculosis Detection from Chest X-Ray Images
+## 🫁 Tuberculosis Detection from Chest X-Ray Images
 
-A machine learning project for automated tuberculosis detection in chest X-ray images using traditional computer vision techniques and Support Vector Machine (SVM) classification.
+A complete machine learning pipeline for automated tuberculosis (TB) detection in chest X-ray images using traditional computer vision techniques and machine learning classifiers (SVM and KNN), plus a Streamlit web app.
 
-## 🌟 Live Demo
-**🚀 [Try the Interactive TB Detection App](https://pcd-tuberculosis-detection.streamlit.app/) 🚀**
-
-Upload your chest X-ray images and get instant TB detection results with 92.86% accuracy!
+---
 
 ## 🎯 Project Overview
 
-This project implements a complete pipeline for TB detection achieving **92.86% accuracy** through image preprocessing, lung segmentation, feature extraction, and machine learning classification.
+This project implements an end‑to‑end workflow:
 
-## 🔬 Key Features
+- **Image preprocessing** (CLAHE, denoising, normalization)
+- **Lung segmentation** (Otsu thresholding + morphology)
+- **Feature extraction** (GLCM + LBP)
+- **Dimensionality reduction** (PCA)
+- **Classification** with:
+  - **SVM (RBF kernel)**
+  - **KNN (k=7, distance‑weighted)**
+- **Interactive Streamlit app** for easy testing and visualization
 
-- **Advanced Image Preprocessing**: CLAHE enhancement, noise reduction, and normalization
-- **Intelligent Lung Segmentation**: Otsu thresholding with morphological operations
-- **Robust Feature Extraction**: GLCM (Gray-Level Co-occurrence Matrix) + LBP (Local Binary Pattern)
-- **High Performance**: 92.86% accuracy with balanced precision and recall
-- **Interactive Visualization**: Real-time TB probability visualization with colored overlays
-- **Easy Testing**: Simple function to test any chest X-ray image
+All experiments and model training are documented in the notebook `pcd-final-project.ipynb`.
 
-## 📊 Performance Results
+---
 
-| Metric | Normal | Tuberculosis | Overall |
-|--------|--------|--------------|---------|
-| **Precision** | 91% | 95% | 93% |
-| **Recall** | 96% | 90% | 93% |
-| **F1-Score** | 93% | 93% | 93% |
-| **Accuracy** | - | - | **92.86%** |
+## 📊 Performance
 
-## 🛠️ Methodology
+### SVM Classifier (Primary Model)
+
+- **Accuracy**: 92.62%
+- **Precision**: Normal 90%, TB 95%
+- **Recall**: Normal 95%, TB 90%
+- **F1-Score**: Normal 93%, TB 92%
+
+### KNN Classifier
+
+- **Accuracy**: 92.14%
+- **Precision**: Normal 88%, TB 97%
+- **Recall**: Normal 97%, TB 87%
+- **F1-Score**: Normal 93%, TB 92%
+
+Both models are trained on a **balanced dataset** (Normal = TB) using the same feature representation (GLCM + LBP + PCA).
+
+---
+
+## 🧪 Methodology
 
 ### 1. Image Preprocessing
-- Resize to 512×512 pixels for consistency
-- Convert to grayscale
-- Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
-- Median blur for noise reduction
-- Normalize to [0,1] range
+
+- **Target size**: 512×512 pixels (`IMG_SIZE = 512`)
+- **Pipeline**:
+  - Convert to grayscale
+  - CLAHE (`clipLimit=2.0`, `tileGridSize=(8, 8)`)
+  - Median blur (`kernel=3`)
+  - Normalize to \[0, 1]
+
+Implementation reference: `preprocess_image` in `pcd-final-project.ipynb`.
 
 ### 2. Lung Segmentation
-- Otsu thresholding for binary mask creation
-- Morphological operations (closing, opening)
-- Small object removal to clean the mask
+
+- **Steps**:
+  - Otsu thresholding on 8‑bit grayscale
+  - Morphological **closing** and **opening** (`disk(5)`)
+  - Remove small objects (< 300 pixels)
+
+Implementation reference: `segment_lungs` in the notebook.
 
 ### 3. Feature Extraction
-- **GLCM Features**: Texture analysis including contrast, correlation, energy, and homogeneity
-- **LBP Features**: Local Binary Pattern histogram with 59 bins for uniform patterns
-- Combined feature vector of 107 dimensions
 
-### 4. Machine Learning Pipeline
-- Dataset balancing (equal Normal and TB samples)
-- Train-test split (70%-30%) with stratification
-- Feature scaling using StandardScaler
-- Dimensionality reduction with PCA (95% variance retained)
-- SVM classifier with RBF kernel
+- **GLCM (Gray-Level Co-occurrence Matrix)**:
+  - Distances: \[1, 2, 4]
+  - Angles: \[0, π/4, π/2, 3π/4]
+  - Properties: contrast, correlation, energy, homogeneity  
+  - **Output**: 48 features
 
-## 🚀 Quick Start
+- **LBP (Local Binary Pattern)**:
+  - Parameters: P=16, R=2, `method='uniform'`
+  - **Output**: 59‑bin normalized histogram
 
-### Prerequisites
+- **Combined feature vector**:
+  - **Total**: 48 (GLCM) + 59 (LBP) = **107 features**
+
+Implementation: `extract_glcm_features`, `extract_lbp_features`, `extract_all_features_from_lung`.
+
+### 4. Dataset & Split
+
+- Original dataset: `TB_Chest_Radiography_Database/`
+  - `Normal/`
+  - `Tuberculosis/`
+- **Balancing**:
+  - Randomly sample Normal images to match number of TB images
+- **Split**:
+  - Train/test = 70% / 30% with stratification (`train_test_split`)
+
+### 5. Feature Scaling & PCA
+
+- **Scaler**: `StandardScaler`
+- **PCA**: `PCA(n_components=0.95)` (retain 95% variance)
+- **Resulting dimension**: 5 principal components (for this dataset)
+
+### 6. Classifiers
+
+- **SVM (primary)**:
+  - Kernel: RBF
+  - C = 10
+  - Gamma = 0.01
+  - `class_weight='balanced'`
+  - `probability=True` (for `predict_proba`)
+
+- **KNN**:
+  - `n_neighbors=7`
+  - `weights='distance'`
+  - `metric='minkowski'`, `p=2` (Euclidean)
+
+---
+
+## 💾 Saved Models
+
+After running the training notebook, the following files are created in `trained_models/`:
+
+- **`svm_model.pkl`** – Trained SVM classifier
+- **`knn_model.pkl`** – Trained KNN classifier
+- **`scaler.pkl`** – `StandardScaler` fitted on training features
+- **`pca.pkl`** – PCA transformer fitted on scaled training features
+- **`model_info.pkl`** – Metadata (accuracies, feature setup, image size, model types)
+
+These are exactly the models used by the Streamlit app.
+
+---
+
+## 📓 Notebook: `pcd-final-project.ipynb`
+
+The notebook contains:
+
+- **Data loading & visualization**
+  - Example Normal and TB images
+- **Preprocessing & segmentation demos**
+  - Before/after plots for preprocessing and lung masks
+- **Feature extraction & dataset building**
+  - Balanced dataset construction
+  - Feature matrix `X_bal` (shape `(1400, 107)`)
+- **Train/test split, scaling & PCA**
+- **Model training & evaluation**
+  - SVM training and metrics
+  - KNN training and metrics
+  - Confusion matrices and ROC curves for both models
+- **Model saving**
+  - Creates all `.pkl` files in `trained_models/`
+- **Manual testing helper**
+  - `test_image_with_visualization(image_path, model_type='svm'|'knn', show_processing_steps=False)`  
+  - Visual overlay and detailed printout for any image
+
+Run all cells sequentially to reproduce the results and generate the model files.
+
+---
+
+## 🌐 Streamlit Web App: `app.py`
+
+The web app provides a professional interface for TB detection.
+
+### Features
+
+- **Model loading** from `trained_models/`
+- **Image upload** (PNG/JPG/JPEG)
+- **Classifier choice**:
+  - SVM or KNN (via radio button)
+- **Prediction display**:
+  - Normal vs TB probabilities
+  - Model used (SVM/KNN)
+  - Colored result box (green for Normal, red for TB)
+- **Visualizations**:
+  - TB probability overlay (red mask on lungs)
+  - Preprocessing / segmentation steps in a separate tab
+  - Basic feature‑pipeline explanation and confidence summary
+- **Safety notice**:
+  - Clear disclaimer: research tool, not a medical device
+
+### Running the App Locally
+
 ```bash
-pip install opencv-python matplotlib numpy scikit-image scikit-learn tqdm
-```
+# (Optional) create and activate a virtual environment
+python -m venv .venv
+.\.venv\Scripts\activate  # Windows
+# or
+source .venv/bin/activate  # macOS / Linux
 
-### Dataset Structure
-```
-TB_Chest_Radiography_Database/
-├── Normal/
-│   ├── Normal-1.png
-│   ├── Normal-2.png
-│   └── ...
-└── Tuberculosis/
-    ├── Tuberculosis-1.png
-    ├── Tuberculosis-2.png
-    └── ...
-```
-
-### Usage
-
-1. **Training the Model**:
-   - Run all cells in the notebook sequentially
-   - The model will be automatically saved in `trained_models/` directory
-
-2. **Testing Individual Images**:
-   ```python
-   # Test any chest X-ray image with visualization
-   test_image_with_visualization(r"path/to/your/chest_xray.png")
-   ```
-
-3. **Understanding Results**:
-   - Red overlay intensity shows TB probability in lung regions
-   - Brighter red = Higher TB probability
-   - Prediction confidence displayed with percentages
-
-## 🌐 Streamlit Web Application
-
-### Interactive TB Detection Interface
-🚀 **[Try the Live Demo](https://pcd-tuberculosis-detection.streamlit.app/)** 🚀
-
-Or run locally for testing and visualization:
-
-```bash
 # Install dependencies
 pip install -r requirements.txt
+
+# Train models (run once)
+# Open and execute all cells in pcd-final-project.ipynb
+# This will create the trained_models/ directory and .pkl files
 
 # Launch Streamlit app
 streamlit run app.py
 ```
 
-### Web App Features
-- **📤 Drag & Drop Upload**: Easy image upload interface
-- **🔬 Real-time Analysis**: Instant TB detection results
-- **🎨 Visual Feedback**: Interactive probability overlays and processing steps
-- **📊 Comprehensive Results**: Detailed confidence scores and model performance metrics
-- **🎯 User-Friendly Design**: Clean, professional interface with progress indicators
-
-The web app opens at `http://localhost:8501` and provides the complete TB detection pipeline in an intuitive interface.
-
-## 🎨 Visualization Features
-
-### Real-time TB Probability Visualization
-- **Red Overlay**: Intensity corresponds to TB probability
-- **Transparency**: 30% opacity to maintain image clarity  
-- **Processing Steps**: Optional view of preprocessing pipeline
-- **Detailed Results**: File path, prediction, and confidence scores
-
-### Example Output
-```
-🔬 TB DETECTION RESULT
-==================================================
-📸 Image: Tuberculosis-57.png
-📍 Full Path: C:\path\to\image.png
-🎯 Prediction: Tuberculosis  
-📊 Normal: 25.3%
-📊 Tuberculosis: 74.7%
-🔴 Red overlay intensity shows TB probability in lung regions
-==================================================
-```
-
-## 📁 Repository Structure
-
-```
-Tuberculosis_Detection/
-├── pcd-final-project.ipynb    # Main notebook with complete pipeline
-├── README.md                  # This file
-├── TB_Chest_Radiography_Database/  # Dataset directory
-│   ├── Normal/               # Normal chest X-rays
-│   └── Tuberculosis/         # TB chest X-rays  
-└── trained_models/           # Saved model files (created after training)
-    ├── svm_model.pkl         # Trained SVM classifier
-    ├── scaler.pkl           # Feature scaler
-    ├── pca.pkl              # PCA transformer
-    └── model_info.pkl       # Model metadata
-```
-
-## 🔧 Technical Details
-
-### Image Processing Pipeline
-1. **Preprocessing**: CLAHE enhancement with 2.0 clip limit
-2. **Segmentation**: Otsu + morphological operations (disk radius=5)
-3. **Feature Extraction**: 48 GLCM + 59 LBP features
-4. **Classification**: SVM with RBF kernel (C=10, γ=0.01)
-
-### Model Parameters
-- **SVM Kernel**: RBF (Radial Basis Function)
-- **Regularization (C)**: 10
-- **Gamma**: 0.01  
-- **Class Weight**: Balanced
-- **PCA Components**: 95% variance retention
-
-## 📈 Model Performance Analysis
-
-- **High Precision for TB (95%)**: Minimizes false positives
-- **High Recall for Normal (96%)**: Excellent normal case detection
-- **Balanced Performance**: Similar F1-scores for both classes
-- **Robust Feature Set**: GLCM + LBP combination proves effective
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/improvement`)
-3. Commit changes (`git commit -am 'Add new feature'`)
-4. Push to branch (`git push origin feature/improvement`)
-5. Create Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- TB Chest Radiography Database for providing the dataset
-- scikit-image and scikit-learn communities for excellent libraries
-- Computer vision and machine learning research community
-
-## 📧 Contact
-
-**Project Maintainer**: [Excelfthn](https://github.com/Excelfthn)
-- GitHub: [@Excelfthn](https://github.com/Excelfthn)
-- Repository: [Tuberculosis_Detection](https://github.com/Excelfthn/Tuberculosis_Detection)
+The app will open in your browser at `http://localhost:8501`.
 
 ---
 
-⭐ **Star this repository if you found it helpful!** ⭐
+## 📦 Requirements
+
+Basic dependencies (see `requirements.txt` for exact versions):
+
+- **Core**:
+  - `numpy`
+  - `matplotlib`
+  - `opencv-python`
+  - `scikit-image`
+  - `scikit-learn`
+  - `tqdm`
+- **Web app**:
+  - `streamlit`
+  - `Pillow`
+
+Install via:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 📁 Repository Structure
+
+```text
+Tuberculosis_Detection/
+├── pcd-final-project.ipynb     # Main notebook (training & experiments)
+├── app.py                      # Streamlit web application
+├── README.md                   # Project documentation
+├── requirements.txt            # Python dependencies
+├── TB_Chest_Radiography_Database/
+│   ├── Normal/                 # Normal chest X-rays
+│   └── Tuberculosis/           # TB chest X-rays
+└── trained_models/             # Created after training
+    ├── svm_model.pkl           # Trained SVM classifier
+    ├── knn_model.pkl           # Trained KNN classifier
+    ├── scaler.pkl              # Feature scaler
+    ├── pca.pkl                 # PCA transformer
+    └── model_info.pkl          # Model metadata
+```
+
+---
+
+## ⚠️ Disclaimer
+
+This project is intended **for research and educational purposes only**.  
+It is **not** a medical device and must **not** be used as a substitute for professional medical diagnosis or treatment. Always consult qualified healthcare professionals for clinical decisions.
+
+

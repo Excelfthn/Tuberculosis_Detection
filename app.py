@@ -1,17 +1,30 @@
+"""
+Tuberculosis Detection System - Streamlit Web Application
+==========================================================
+A professional web interface for TB detection from chest X-ray images.
+
+This application implements the same pipeline as pcd-final-project.ipynb:
+1. Image Preprocessing (CLAHE, median blur, normalization)
+2. Lung Segmentation (Otsu thresholding + morphological operations)
+3. Feature Extraction (GLCM + LBP = 107 features)
+4. Classification (SVM with RBF kernel)
+
+Reference: pcd-final-project.ipynb
+"""
+
 import streamlit as st
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 import pickle
 import os
 from PIL import Image
-import io
-import base64
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 from skimage.filters import threshold_otsu
 from skimage.morphology import closing, opening, disk, remove_small_objects
 
-# Page configuration
+# =============================================================================
+# PAGE CONFIGURATION
+# =============================================================================
 st.set_page_config(
     page_title="TB Detection System",
     page_icon="🫁",
@@ -19,456 +32,448 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Fix for OpenCV on Streamlit Cloud
-import os
-os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
-
-# Custom CSS for better styling
+# =============================================================================
+# CUSTOM STYLING
+# =============================================================================
 st.markdown("""
 <style>
     .main-header {
-        font-size: 3rem;
-        color: #1f77b4;
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #1a1a2e;
         text-align: center;
+        padding: 1rem 0;
+        border-bottom: 3px solid #4a69bd;
         margin-bottom: 2rem;
     }
     
-    .sub-header {
-        font-size: 1.5rem;
-        color: #ff6b6b;
-        margin-bottom: 1rem;
+    .section-header {
+        font-size: 1.4rem;
+        font-weight: 600;
+        color: #4a69bd;
+        margin: 1.5rem 0 1rem 0;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #e8e8e8;
     }
     
-    .result-box {
-        padding: 1rem;
-        border-radius: 10px;
+    .result-card {
+        padding: 1.5rem;
+        border-radius: 12px;
         margin: 1rem 0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
     
-    .normal-result {
-        background-color: #d4edda;
-        border: 2px solid #28a745;
-        color: #155724;
+    .result-normal {
+        background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+        border-left: 5px solid #28a745;
     }
     
-    .tb-result {
-        background-color: #f8d7da;
-        border: 2px solid #dc3545;
-        color: #721c24;
+    .result-tb {
+        background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+        border-left: 5px solid #dc3545;
     }
     
-    .info-box {
-        background-color: #e7f3ff;
+    .metric-card {
+        background: #f8f9fa;
         padding: 1rem;
         border-radius: 8px;
-        border-left: 4px solid #007bff;
+        text-align: center;
+        border: 1px solid #e9ecef;
+    }
+    
+    .info-panel {
+        background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+        padding: 1.2rem;
+        border-radius: 10px;
+        border-left: 4px solid #2196f3;
         margin: 1rem 0;
+    }
+    
+    .warning-panel {
+        background: #fff3cd;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #ffc107;
+        margin: 1rem 0;
+        font-size: 0.9rem;
+    }
+    
+    .footer {
+        text-align: center;
+        color: #6c757d;
+        padding: 2rem 0;
+        margin-top: 3rem;
+        border-top: 1px solid #e9ecef;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Title and description
-st.markdown('<h1 class="main-header">🫁 Tuberculosis Detection System</h1>', unsafe_allow_html=True)
-st.markdown("""
-<div class="info-box">
-    <h3>🎯 About This System</h3>
-    <p>This advanced TB detection system uses machine learning to analyze chest X-ray images with <strong>92.86% accuracy</strong>.</p>
-    <p><strong>Features:</strong> CLAHE preprocessing, Otsu segmentation, GLCM + LBP feature extraction, SVM classification</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Constants
+# =============================================================================
+# CONSTANTS (matching notebook: pcd-final-project.ipynb)
+# =============================================================================
 IMG_SIZE = 512
 MODEL_DIR = "trained_models"
 
-@st.cache_data
+# =============================================================================
+# MODEL LOADING
+# =============================================================================
+@st.cache_resource
 def load_models():
-    """Load the trained models and preprocessors"""
+    """
+    Load trained models from pcd-final-project.ipynb
+    
+    Expected files in trained_models/:
+    - svm_model.pkl: SVM classifier with RBF kernel
+    - knn_model.pkl: KNN classifier (k=7, distance-weighted)
+    - scaler.pkl: StandardScaler for feature normalization
+    - pca.pkl: PCA transformer (95% variance retention)
+    """
+    required_files = ['svm_model.pkl', 'knn_model.pkl', 'scaler.pkl', 'pca.pkl']
+    
+    for file in required_files:
+        if not os.path.exists(os.path.join(MODEL_DIR, file)):
+            return None, None, None, None, f"Missing: {file}"
+    
     try:
-        # Check if model files exist
-        model_files = ['svm_model.pkl', 'scaler.pkl', 'pca.pkl']
-        missing_files = []
-        
-        for file in model_files:
-            if not os.path.exists(os.path.join(MODEL_DIR, file)):
-                missing_files.append(file)
-        
-        if missing_files:
-            st.error(f"❌ Model files not found: {', '.join(missing_files)}")
-            st.info("""📝 **Setup Instructions:**
-            
-1. The trained models are not included in the repository due to file size limits
-2. To use this app locally:
-   - Run the Jupyter notebook `pcd-final-project.ipynb`
-   - Train the model by executing all cells
-   - Models will be saved in `trained_models/` directory
-3. For cloud deployment, consider using Git LFS or cloud storage for model files
-            """)
-            return None, None, None
-        
         with open(os.path.join(MODEL_DIR, 'svm_model.pkl'), 'rb') as f:
             svm_model = pickle.load(f)
-        
+        with open(os.path.join(MODEL_DIR, 'knn_model.pkl'), 'rb') as f:
+            knn_model = pickle.load(f)
         with open(os.path.join(MODEL_DIR, 'scaler.pkl'), 'rb') as f:
             scaler = pickle.load(f)
-            
         with open(os.path.join(MODEL_DIR, 'pca.pkl'), 'rb') as f:
             pca = pickle.load(f)
-            
-        return svm_model, scaler, pca
+        return svm_model, knn_model, scaler, pca, None
     except Exception as e:
-        st.error(f"❌ Error loading models: {str(e)}")
-        return None, None, None
+        return None, None, None, None, str(e)
 
+# =============================================================================
+# IMAGE PROCESSING FUNCTIONS (exact match to notebook)
+# =============================================================================
 def preprocess_image(img_bgr):
     """
-    Preprocess chest X-ray image - EXACT MATCH to notebook
+    Preprocess chest X-ray image.
+    Reference: pcd-final-project.ipynb Cell 2
+    
+    Pipeline:
+    1. Resize to 512x512
+    2. Convert to grayscale
+    3. CLAHE enhancement (clipLimit=2.0, tileGridSize=8x8)
+    4. Median blur (kernel=3)
+    5. Normalize to [0,1]
     """
-    # 1. Resize ke 512x512 supaya semua seragam
     img_resized = cv2.resize(img_bgr, (IMG_SIZE, IMG_SIZE))
-    
-    # 2. Convert BGR -> Grayscale
     gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
-    
-    # 3. CLAHE (Contrast Limited Adaptive Histogram Equalization)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
-    
-    # 4. Noise reduction (median blur) - NOTEBOOK USES 3, not 5!
     denoised = cv2.medianBlur(enhanced, 3)
-    
-    # 5. Normalisasi ke 0–1 (float32)
     norm = denoised.astype(np.float32) / 255.0
-    
     return norm
+
 
 def segment_lungs(img):
     """
-    Segment lung regions - EXACT MATCH to notebook
+    Segment lung regions using Otsu thresholding.
+    Reference: pcd-final-project.ipynb Cell 4
+    
+    Pipeline:
+    1. Otsu thresholding
+    2. Morphological closing (disk=5)
+    3. Morphological opening (disk=5)
+    4. Remove small objects (<300 pixels)
     """
-    # Convert ke range 0–255 lagi untuk thresholding Otsu
     img_uint8 = (img * 255).astype(np.uint8)
-
-    # 1. Otsu threshold
     thresh = threshold_otsu(img_uint8)
-    mask = img_uint8 > thresh   # True/False mask
-
-    # 2. Morphology cleaning - NOTEBOOK USES 300, not 500!
-    mask = closing(mask, disk(5))   # tutup lubang kecil
-    mask = opening(mask, disk(5))   # hapus noise kecil
-    mask = remove_small_objects(mask, 300)  # buang objek kecil (<300 pixel)
-
+    mask = img_uint8 > thresh
+    mask = closing(mask, disk(5))
+    mask = opening(mask, disk(5))
+    mask = remove_small_objects(mask, 300)
     return mask
+
 
 def extract_glcm_features(img):
     """
-    Extract GLCM texture features - matches notebook implementation
-    """
-    # Convert to 0-255 range
-    img_uint8 = (img * 255).astype(np.uint8)
+    Extract GLCM texture features.
+    Reference: pcd-final-project.ipynb Cell 6
     
-    # Use same parameters as in notebook: distances=[1, 2, 4], levels=256
+    Parameters:
+    - Distances: [1, 2, 4]
+    - Angles: [0, π/4, π/2, 3π/4]
+    - Properties: contrast, correlation, energy, homogeneity
+    
+    Output: 48 features (4 properties × 3 distances × 4 angles)
+    """
+    img_uint8 = (img * 255).astype(np.uint8)
     distances = [1, 2, 4]
     angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]
-    
-    # Calculate GLCM with full 256 levels to match notebook
     glcm = graycomatrix(
         img_uint8,
         distances=distances,
         angles=angles,
-        levels=256,        # Match notebook: full 256 levels
+        levels=256,
         symmetric=True,
         normed=True
     )
-    
-    # Extract properties for all distance-angle combinations
     features = []
     for prop in ['contrast', 'correlation', 'energy', 'homogeneity']:
-        vals = graycoprops(glcm, prop)  # shape: (len(distances), len(angles))
-        features.extend(vals.ravel())   # flatten & add to list
-    
+        vals = graycoprops(glcm, prop)
+        features.extend(vals.ravel())
     return np.array(features, dtype=np.float32)
+
 
 def extract_lbp_features(img, P=16, R=2):
     """
-    Extract Local Binary Pattern features - matches notebook implementation
+    Extract Local Binary Pattern features.
+    Reference: pcd-final-project.ipynb Cell 8
+    
+    Parameters:
+    - P: 16 sampling points
+    - R: 2 radius
+    - Method: uniform
+    
+    Output: 59 histogram bins
     """
-    # Convert to uint8
     img_uint8 = (img * 255).astype(np.uint8)
-    
-    # Calculate uniform LBP
     lbp = local_binary_pattern(img_uint8, P=P, R=R, method='uniform')
-    
-    # Histogram with 59 bins for uniform pattern (matches notebook)
     hist, _ = np.histogram(lbp.ravel(), bins=59, range=(0, 59), density=True)
-    
     return hist.astype(np.float32)
 
-def extract_all_features_from_lung(lung_img):
+
+def extract_all_features(lung_img):
     """
-    Extract combined GLCM and LBP features
+    Extract combined GLCM + LBP features.
+    Reference: pcd-final-project.ipynb Cell 9
+    
+    Output: 107 features (48 GLCM + 59 LBP)
     """
     glcm_feat = extract_glcm_features(lung_img)
     lbp_feat = extract_lbp_features(lung_img)
+    return np.concatenate([glcm_feat, lbp_feat], axis=0)
+
+
+def process_uploaded_image(image):
+    """
+    Complete processing pipeline for uploaded image.
+    Reference: pcd-final-project.ipynb Cell 10
+    """
+    img_array = np.array(image)
     
-    # Combine features
-    all_feats = np.concatenate([glcm_feat, lbp_feat], axis=0)
-    return all_feats
+    if len(img_array.shape) == 3:
+        if img_array.shape[2] == 4:
+            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
+        else:
+            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+    else:
+        img_bgr = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
+    
+    img_prep = preprocess_image(img_bgr)
+    mask = segment_lungs(img_prep)
+    lung_only = img_prep * mask
+    features = extract_all_features(lung_only)
+    
+    return features, img_prep, mask, lung_only, img_bgr
 
-def process_image_for_prediction(image):
-    """
-    Process uploaded image for prediction - EXACT MATCH to notebook workflow
-    """
-    try:
-        # Convert PIL Image to OpenCV format (BGR)
-        img_array = np.array(image)
-        
-        # Handle different image formats
-        if len(img_array.shape) == 3:
-            if img_array.shape[2] == 4:  # RGBA
-                img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
-            elif img_array.shape[2] == 3:  # RGB
-                img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        else:  # Grayscale
-            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
-        
-        # Follow EXACT notebook workflow:
-        # 1. Preprocess (notebook: preprocess_image)
-        img_prep = preprocess_image(img_bgr)
-        
-        # 2. Segmentation (notebook: segment_lungs)
-        mask = segment_lungs(img_prep)
-        lung_only = img_prep * mask  # notebook: multiply mask
-        
-        # 3. Feature extraction (notebook: extract_all_features_from_lung)
-        features = extract_all_features_from_lung(lung_only)
-        
-        # Debug info
-        st.write(f"🔍 Debug: Extracted {len(features)} features")
-        st.write(f"📊 Feature shape: {features.shape}")
-        
-        return features, img_prep, mask, lung_only, img_bgr
-        
-    except Exception as e:
-        st.error(f"Error processing image: {str(e)}")
-        import traceback
-        st.error(f"Full error: {traceback.format_exc()}")
-        return None, None, None, None, None
 
-def create_visualization(img_bgr, lung_mask, tb_probability):
-    """
-    Create visualization with TB probability overlay
-    """
-    # Convert BGR to RGB for display
+def create_overlay(img_bgr, mask, tb_prob):
+    """Create TB probability visualization overlay."""
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    
-    # Create red overlay based on TB probability
     overlay = np.zeros_like(img_rgb)
-    overlay[:, :, 0] = lung_mask * tb_probability * 255  # Red channel
-    
-    # Blend original image with overlay
-    alpha = 0.3  # Transparency
+    overlay[:, :, 0] = mask * tb_prob * 255
+    alpha = 0.3
     result = cv2.addWeighted(img_rgb, 1-alpha, overlay.astype(np.uint8), alpha, 0)
-    
     return result
 
-def main():
-    # Load models
-    svm_model, scaler, pca = load_models()
+# =============================================================================
+# SIDEBAR
+# =============================================================================
+def render_sidebar():
+    """Render sidebar with instructions and model info."""
+    st.sidebar.markdown("## 📖 Instructions")
+    st.sidebar.markdown("""
+    1. Upload a chest X-ray image
+    2. Click **Analyze Image**
+    3. View detection results and visualizations
+    """)
     
-    if svm_model is None:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("## 📊 Model Performance")
+    
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        st.sidebar.metric("SVM Accuracy", "92.62%")
+        st.sidebar.metric("KNN Accuracy", "92.14%")
+    with col2:
+        st.sidebar.metric("TB Precision", "95%")
+        st.sidebar.metric("Normal Recall", "95%")
+    
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("## 🔧 Technical Details")
+    st.sidebar.markdown("""
+    **Pipeline:**
+    - Preprocessing: CLAHE + Median Blur
+    - Segmentation: Otsu + Morphology
+    - Features: GLCM (48) + LBP (59)
+    - Classifier: SVM (RBF kernel)
+    - PCA: 95% variance retained
+    """)
+    
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("""
+    <div style="text-align: center; font-size: 0.8rem; color: #888;">
+        Reference: pcd-final-project.ipynb
+    </div>
+    """, unsafe_allow_html=True)
+
+# =============================================================================
+# MAIN APPLICATION
+# =============================================================================
+def main():
+    render_sidebar()
+    
+    st.markdown('<h1 class="main-header">🫁 Tuberculosis Detection System</h1>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="info-panel">
+        <strong>🎯 About This System</strong><br>
+        Advanced TB detection using computer vision and machine learning. 
+        Upload a chest X-ray image to get instant analysis with <strong>92.62% accuracy</strong>.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    svm_model, knn_model, scaler, pca, error = load_models()
+    
+    if error:
+        st.error(f"❌ Model Loading Error: {error}")
+        st.markdown("""
+        <div class="warning-panel">
+            <strong>⚠️ Setup Required</strong><br>
+            Models not found. Please run <code>pcd-final-project.ipynb</code> to train and save the models.
+        </div>
+        """, unsafe_allow_html=True)
         st.stop()
     
-    # Sidebar
-    st.sidebar.markdown("## 📋 Instructions")
-    st.sidebar.markdown("""
-    1. Upload a chest X-ray image (PNG, JPG, JPEG)
-    2. Click 'Analyze Image' to get TB detection results
-    3. View the analysis with probability visualization
-    4. Red overlay intensity shows TB probability
-    """)
+    st.success("✅ Models loaded successfully (SVM + KNN)")
     
-    st.sidebar.markdown("## 📊 Model Performance")
-    st.sidebar.markdown("""
-    - **Accuracy**: 92.86%
-    - **TB Precision**: 95%
-    - **Normal Recall**: 96%
-    - **Feature Extraction**: GLCM + LBP
-    - **Classifier**: SVM with RBF kernel
-    """)
+    col_upload, col_results = st.columns([1, 1])
     
-    # Main content
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.markdown('<h2 class="sub-header">📤 Upload Image</h2>', unsafe_allow_html=True)
-        
-        # Show model status
-        if svm_model is None:
-            st.warning("⚠️ Models not loaded. Please check setup instructions above.")
-            st.stop()
-        else:
-            st.success("✅ Models loaded successfully!")
-            # Show expected feature count for debugging
-            if hasattr(scaler, 'n_features_in_'):
-                st.info(f"📊 Expected features: {scaler.n_features_in_}")
+    with col_upload:
+        st.markdown('<p class="section-header">📤 Upload Image</p>', unsafe_allow_html=True)
         
         uploaded_file = st.file_uploader(
-            "Choose a chest X-ray image...",
+            "Select a chest X-ray image",
             type=['png', 'jpg', 'jpeg'],
-            help="Upload a clear chest X-ray image for TB detection analysis"
+            help="Supported formats: PNG, JPG, JPEG"
         )
         
-        if uploaded_file is not None:
-            # Display uploaded image
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded X-ray Image", use_column_width=True)
-            
-            # Analysis button
-            if st.button("🔬 Analyze Image", type="primary"):
-                with st.spinner("🔄 Processing image and extracting features..."):
-                    # Process image
-                    features, img_prep, mask, lung_only, img_bgr = process_image_for_prediction(image)
-                    
-                    if features is not None:
-                        try:
-                            # Validate feature dimensions
-                            expected_features = scaler.n_features_in_ if hasattr(scaler, 'n_features_in_') else len(features)
-                            if len(features) != expected_features:
-                                st.error(f"❌ Feature dimension mismatch: Expected {expected_features}, got {len(features)}")
-                                st.info("This might be due to different model training parameters. Please retrain the model with current settings.")
-                                return
-                            
-                            # Make prediction
-                            features_scaled = scaler.transform([features])
-                            features_pca = pca.transform(features_scaled)
-                            
-                            # Get prediction and probabilities
-                            prediction = svm_model.predict(features_pca)[0]
-                        except Exception as e:
-                            st.error(f"❌ Prediction error: {str(e)}")
-                            st.info("There might be a compatibility issue between the saved models and current feature extraction. Please retrain the model.")
-                            return
-                        
-                        # Get probabilities
-                        if hasattr(svm_model, 'predict_proba'):
-                            probabilities = svm_model.predict_proba(features_pca)[0]
-                            normal_prob = probabilities[0]
-                            tb_prob = probabilities[1]
-                        else:
-                            # Fallback using decision function
-                            decision_score = svm_model.decision_function(features_pca)[0]
-                            # Convert to probability-like score
-                            tb_prob = 1 / (1 + np.exp(-decision_score))
-                            normal_prob = 1 - tb_prob
-                        
-                        # Store results in session state
-                        st.session_state.prediction = prediction
-                        st.session_state.normal_prob = normal_prob
-                        st.session_state.tb_prob = tb_prob
-                        st.session_state.img_bgr = img_bgr
-                        st.session_state.mask = mask
-                        st.session_state.img_prep = img_prep
-                        st.session_state.lung_only = lung_only
-    
-    with col2:
-        st.markdown('<h2 class="sub-header">📋 Analysis Results</h2>', unsafe_allow_html=True)
+        model_choice = st.radio(
+            "Select Classifier",
+            options=["SVM", "KNN"],
+            horizontal=True,
+            help="SVM: 92.62% accuracy | KNN: 92.14% accuracy"
+        )
         
-        if hasattr(st.session_state, 'prediction'):
-            # Display prediction results
-            prediction = st.session_state.prediction
+        if uploaded_file:
+            image = Image.open(uploaded_file)
+            st.image(image, caption="Uploaded X-ray", use_column_width=True)
+            
+            analyze_btn = st.button("🔬 Analyze Image", type="primary", use_container_width=True)
+            
+            if analyze_btn:
+                with st.spinner("Processing..."):
+                    features, img_prep, mask, lung_only, img_bgr = process_uploaded_image(image)
+                    
+                    if features is not None and len(features) == 107:
+                        features_scaled = scaler.transform([features])
+                        features_pca = pca.transform(features_scaled)
+                        
+                        model = svm_model if model_choice == "SVM" else knn_model
+                        prediction = model.predict(features_pca)[0]
+                        probs = model.predict_proba(features_pca)[0]
+                        normal_prob, tb_prob = probs[0], probs[1]
+                        
+                        st.session_state.update({
+                            'prediction': prediction,
+                            'normal_prob': normal_prob,
+                            'tb_prob': tb_prob,
+                            'model_used': model_choice,
+                            'img_bgr': img_bgr,
+                            'img_prep': img_prep,
+                            'mask': mask,
+                            'lung_only': lung_only
+                        })
+                    else:
+                        st.error("Feature extraction failed. Please try another image.")
+    
+    with col_results:
+        st.markdown('<p class="section-header">📋 Analysis Results</p>', unsafe_allow_html=True)
+        
+        if 'prediction' in st.session_state:
+            pred = st.session_state.prediction
             normal_prob = st.session_state.normal_prob
             tb_prob = st.session_state.tb_prob
+            model_used = st.session_state.get('model_used', 'SVM')
             
-            # Result box
-            result_class = "tb-result" if prediction == 1 else "normal-result"
-            result_text = "Tuberculosis Detected" if prediction == 1 else "Normal - No TB Detected"
-            result_icon = "🔴" if prediction == 1 else "🟢"
+            result_class = "result-tb" if pred == 1 else "result-normal"
+            result_text = "Tuberculosis Detected" if pred == 1 else "Normal"
+            result_icon = "🔴" if pred == 1 else "🟢"
             
-            st.markdown(f'''
-            <div class="result-box {result_class}">
-                <h3>{result_icon} {result_text}</h3>
-                <p><strong>Confidence Scores:</strong></p>
-                <p>Normal: {normal_prob:.1%}</p>
-                <p>Tuberculosis: {tb_prob:.1%}</p>
+            st.markdown(f"""
+            <div class="result-card {result_class}">
+                <h2 style="margin:0;">{result_icon} {result_text}</h2>
+                <p style="margin-top:0.5rem; font-size:0.9rem; color:#666;">Model: {model_used}</p>
+                <p style="margin-top:1rem; font-size:1.1rem;">
+                    <strong>Normal:</strong> {normal_prob:.1%}<br>
+                    <strong>Tuberculosis:</strong> {tb_prob:.1%}
+                </p>
             </div>
-            ''', unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
             
-            # Progress bars for probabilities
-            st.markdown("**Probability Distribution:**")
             st.progress(float(normal_prob), text=f"Normal: {normal_prob:.1%}")
             st.progress(float(tb_prob), text=f"TB: {tb_prob:.1%}")
-            
-    # Visualization section
-    if hasattr(st.session_state, 'img_bgr'):
+        else:
+            st.info("Upload an image and click **Analyze Image** to see results.")
+    
+    if 'img_bgr' in st.session_state:
         st.markdown("---")
-        st.markdown('<h2 class="sub-header">🎨 Visualization & Processing Steps</h2>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">🎨 Visualizations</p>', unsafe_allow_html=True)
         
-        # Create tabs for different visualizations
-        tab1, tab2, tab3 = st.tabs(["🔍 TB Probability Overlay", "⚙️ Processing Steps", "📈 Feature Analysis"])
+        tab1, tab2 = st.tabs(["🔍 TB Probability Overlay", "⚙️ Processing Steps"])
         
         with tab1:
-            # Create and display visualization
-            visualization = create_visualization(
-                st.session_state.img_bgr, 
-                st.session_state.mask, 
+            overlay = create_overlay(
+                st.session_state.img_bgr,
+                st.session_state.mask,
                 st.session_state.tb_prob
             )
             
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(cv2.cvtColor(st.session_state.img_bgr, cv2.COLOR_BGR2RGB), 
-                        caption="Original X-ray", use_column_width=True)
-            with col2:
-                st.image(visualization, 
-                        caption="TB Probability Overlay (Red = Higher TB Probability)", 
-                        use_column_width=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                st.image(
+                    cv2.cvtColor(st.session_state.img_bgr, cv2.COLOR_BGR2RGB),
+                    caption="Original",
+                    use_column_width=True
+                )
+            with c2:
+                st.image(overlay, caption="TB Probability Overlay", use_column_width=True)
             
-            st.info("🔴 **Red Overlay Explanation**: The intensity of red color indicates the probability of tuberculosis in lung regions. Brighter red areas suggest higher TB probability.")
+            st.info("🔴 Red intensity indicates TB probability in lung regions.")
         
         with tab2:
-            # Show processing steps
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.image(st.session_state.img_prep, caption="1. Preprocessed (CLAHE)", 
-                        use_column_width=True, clamp=True)
-            
-            with col2:
-                st.image(st.session_state.mask, caption="2. Lung Segmentation", 
-                        use_column_width=True, clamp=True)
-            
-            with col3:
-                st.image(st.session_state.lung_only, caption="3. Lung Regions Only", 
-                        use_column_width=True, clamp=True)
-        
-        with tab3:
-            # Feature analysis
-            st.markdown("### 📊 Extracted Features Summary")
-            
-            if hasattr(st.session_state, 'prediction'):
-                # Show feature extraction info
-                st.info("""
-                **Feature Extraction Process:**
-                - **GLCM Features**: 48 texture features (contrast, correlation, energy, homogeneity)
-                - **LBP Features**: 59 local binary pattern histogram features  
-                - **Total Features**: 107 features combined
-                - **Preprocessing**: StandardScaler normalization + PCA dimensionality reduction
-                """)
-                
-                # Show confidence interpretation
-                confidence_level = "High" if max(st.session_state.normal_prob, st.session_state.tb_prob) > 0.8 else "Medium" if max(st.session_state.normal_prob, st.session_state.tb_prob) > 0.6 else "Low"
-                st.markdown(f"**Model Confidence**: {confidence_level} ({max(st.session_state.normal_prob, st.session_state.tb_prob):.1%})")
-
-    # Footer information
-    st.markdown("---")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.image(st.session_state.img_prep, caption="1. Preprocessed", use_column_width=True, clamp=True)
+            with c2:
+                st.image(st.session_state.mask, caption="2. Lung Mask", use_column_width=True, clamp=True)
+            with c3:
+                st.image(st.session_state.lung_only, caption="3. Segmented", use_column_width=True, clamp=True)
+    
     st.markdown("""
-    <div style="text-align: center; color: #666; margin-top: 2rem;">
-        <p>🏥 <strong>TB Detection System</strong> | Accuracy: 92.86% | 
-        Built with Computer Vision & Machine Learning</p>
-        <p><em>⚠️ This tool is for research purposes only. Always consult healthcare professionals for medical diagnosis.</em></p>
+    <div class="footer">
+        <strong>🏥 TB Detection System</strong> | SVM Accuracy: 92.62% | KNN Accuracy: 92.14%<br>
+        <em>⚠️ For research purposes only. Consult healthcare professionals for diagnosis.</em>
     </div>
     """, unsafe_allow_html=True)
+
 
 if __name__ == "__main__":
     main()
