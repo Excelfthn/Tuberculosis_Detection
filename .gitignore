@@ -97,8 +97,5 @@ dmypy.json
 .pyre/
 
 # Project specific
-trained_models/
-*.pkl
-*.model
 .DS_Store
 Thumbs.db
